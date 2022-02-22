@@ -3,6 +3,8 @@
 #include <unistd.h>
 #include <string.h>
 
+#define OVERHEAD 3 //bytes for each compression
+
 /**
  * TODO compress multiple times
  * until the delta of saved bytes
@@ -15,13 +17,23 @@ int extract_longest_seq(char *filename);
 int main(int argc, char **argv)
 {
     int c;
+    u_int64_t bytes_saved = 0;
+    u_int64_t total_bytes_saved = 0;
+    u_int64_t accumulated_overhead = 0;
 
     while ((c = getopt(argc, argv, "c:x:")) != -1)
     {
         switch (c)
         {
         case 'c': // compress
-            compress_longest_seq(optarg);
+            do {
+                /*Apply compression many times until i reach the maximum*/
+                bytes_saved = compress_longest_seq(optarg);
+                total_bytes_saved += bytes_saved;
+                accumulated_overhead += OVERHEAD;
+            } while (bytes_saved > OVERHEAD);
+            printf("Saved %lu bytes\n", (total_bytes_saved - accumulated_overhead));
+            
             break;
         case 'x': // extract
             extract_longest_seq(optarg);
@@ -42,6 +54,7 @@ which appears the less times*/
 #define M 1 // byte
 #define Ls (1 << 8 * N)
 #define Ss (1 << 8 * M)
+#define unpredictable_random_name "__c_y_press_020141__"
 int compress_longest_seq(char *filename)
 {
     FILE *src, *dest;
@@ -52,9 +65,17 @@ int compress_longest_seq(char *filename)
     u_int8_t buff[M];
     u_int8_t longer_buff[N];
     u_int8_t short_buffer[M];
+    const char *last_four = &filename[strlen(filename)-4];
 
-    src = fopen(filename, "rb");
-    dest = fopen(strcat(filename, ".cpr"), "wb");
+    /*If .cpr is already present at the end, then don't add*/
+    if (strcmp(last_four, ".cpr") == 0) {
+        rename(filename, unpredictable_random_name);
+        src = fopen(unpredictable_random_name, "rb");
+        dest = fopen(filename, "wb");
+    } else {
+        src = fopen(filename, "rb");
+        dest = fopen(strcat(filename, ".cpr"), "wb");
+    }
 
     if (!src || !dest)
     {
@@ -157,12 +178,12 @@ int compress_longest_seq(char *filename)
     {
         fwrite(&(longer_buff[0]), sizeof(u_int8_t), 1, dest);
     }
-    printf("Saved around %lu bytes with compression\n", (max - min));
 
     fclose(src);
     fclose(dest);
-
-    return 0;
+    remove(unpredictable_random_name);
+    /*Return how many bytes i saved*/
+    return (max - min);
 }
 int extract_longest_seq(char *filename)
 {
