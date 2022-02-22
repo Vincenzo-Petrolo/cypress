@@ -3,6 +3,12 @@
 #include <unistd.h>
 #include <string.h>
 
+/**
+ * TODO compress multiple times
+ * until the delta of saved bytes
+ * reaches 0.
+ */
+
 int compress_longest_seq(char *filename);
 int extract_longest_seq(char *filename);
 
@@ -42,8 +48,10 @@ int compress_longest_seq(char *filename)
     u_int64_t longest_sequences[Ls] = {0}; // this might become cumbersome
     u_int64_t shortest_sequence[Ss] = {0}; // this too
     u_int64_t max = 0, min = __UINT64_MAX__;
-    u_int16_t long_buffer;
-    u_int8_t short_buffer;
+    u_int8_t long_buffer[N];
+    u_int8_t buff[M];
+    u_int8_t longer_buff[N];
+    u_int8_t short_buffer[M];
 
     src = fopen(filename, "rb");
     dest = fopen(strcat(filename, ".cpr"), "wb");
@@ -54,16 +62,24 @@ int compress_longest_seq(char *filename)
         exit(EXIT_FAILURE);
     }
 
-    while (fread((u_int8_t *)(&long_buffer), sizeof(u_int8_t), 2, src) == 2)
+    /*Fill the buffer with first 2 bytes*/
+    fread(&longer_buff, sizeof(u_int8_t), 2, src);
+
+    while (fread(buff, sizeof(u_int8_t), 1, src) == 1)
     {
-        longest_sequences[long_buffer]++;
+        int tmp = ((((u_int16_t) longer_buff[0]) << 8) | (u_int16_t)longer_buff[1]);
+        longest_sequences[tmp]++;
+
+        /*update the new buffer with two most recent bytes*/
+        longer_buff[0] = longer_buff[1];
+        longer_buff[1] = buff[0];
     }
 
     rewind(src);
 
-    while (fread(&short_buffer, sizeof(u_int8_t), 1, src) == 1)
+    while (fread(short_buffer, sizeof(u_int8_t), 1, src) == 1)
     {
-        shortest_sequence[short_buffer]++;
+        shortest_sequence[short_buffer[0]]++;
     }
 
     /*Search max and minimum*/
@@ -72,7 +88,8 @@ int compress_longest_seq(char *filename)
         if (longest_sequences[i] > max)
         {
             max = longest_sequences[i];
-            long_buffer = i;
+            long_buffer[1] = ((u_int16_t)i) & 0x00FF;
+            long_buffer[0] = (((u_int16_t)i) >> 8) & 0x00FF;
         }
     }
 
@@ -81,42 +98,65 @@ int compress_longest_seq(char *filename)
         if (shortest_sequence[i] < min)
         {
             min = longest_sequences[i];
-            short_buffer = i;
+            short_buffer[0] = i;
         }
     }
 
     /*Write info for reconstruction*/
-    fwrite((u_int8_t *)(&long_buffer), sizeof(u_int8_t), 2, dest);
-    fwrite(&short_buffer, sizeof(u_int8_t), 1, dest);
+    fwrite(long_buffer, sizeof(u_int8_t), 2, dest);
+    fwrite(short_buffer, sizeof(u_int8_t), 1, dest);
 
     rewind(src);
     /*Read again and replace*/
-    u_int16_t buff;
-    while (fread((u_int8_t *)(&buff), sizeof(u_int8_t), 2, src) == 2)
-    {
-        if (buff == long_buffer)
+    /*Fill the buffer with first 2 bytes*/
+    fread(longer_buff, sizeof(u_int8_t), 2, src);
+
+    while (fread(buff, sizeof(u_int8_t), 1, src) == 1) {
+        if (longer_buff[0] == long_buffer[0] && longer_buff[1] == long_buffer[1])
         {
-            fwrite(&short_buffer, sizeof(u_int8_t), 1, dest);
+            fwrite(short_buffer, sizeof(u_int8_t), 1, dest);
+            /*Refill the buffer*/
+            longer_buff[0] = longer_buff[1];
+            longer_buff[1] = buff[0];
+            fread(buff, sizeof(u_int8_t), 1, src);
+            longer_buff[0] = longer_buff[1];
+            longer_buff[1] = buff[0];
+            continue;
         }
         else
         {
-            /*Search the short sequence pattern in the 2 bytes read*/
-            if (short_buffer == ((u_int8_t *)(&buff))[0])
+            if (short_buffer[0] == long_buffer[0])
             {
-                fwrite(&long_buffer, sizeof(u_int8_t), 2, dest);
-            } else {
-                fwrite(&(((u_int8_t *)(&buff))[0]), sizeof(u_int8_t), 1, dest);
+                fwrite(long_buffer, sizeof(u_int8_t), 2, dest);
             }
-            if (short_buffer == ((u_int8_t *)(&buff))[1])
+            else
             {
-                fwrite(&long_buffer, sizeof(u_int8_t), 2, dest);
-            } else {
-                fwrite(&(((u_int8_t *)(&buff))[1]), sizeof(u_int8_t), 1, dest);
+                fwrite(&(longer_buff[0]), sizeof(u_int8_t), 1, dest);
             }
-            
         }
+        /*update the new buffer with two most recent bytes*/
+        longer_buff[0] = longer_buff[1];
+        longer_buff[1] = buff[0];
+    } 
+    if (short_buffer[0] == longer_buff[0])
+    {
+        fwrite(long_buffer, sizeof(u_int8_t), 2, dest);
     }
+    else
+    {
+        fwrite(&(longer_buff[0]), sizeof(u_int8_t), 1, dest);
+    }
+    longer_buff[0] = longer_buff[1];
+    longer_buff[1] = buff[0];
 
+    if (short_buffer[0] == longer_buff[0])
+    {
+        fwrite(long_buffer, sizeof(u_int8_t), 2, dest);
+    }
+    else
+    {
+        fwrite(&(longer_buff[0]), sizeof(u_int8_t), 1, dest);
+    }
     printf("Saved around %lu bytes with compression\n", (max - min));
 
     fclose(src);
@@ -128,9 +168,11 @@ int extract_longest_seq(char *filename)
 {
 
     FILE *src, *dest;
-    u_int16_t long_buffer;
-    u_int16_t buff;
-    u_int8_t short_buffer;
+    u_int8_t long_buffer[N];
+    u_int8_t buff[M];
+    u_int8_t longer_buff[N];
+    u_int8_t short_buffer[M];
+
 
     src = fopen(filename, "r");
     filename[strlen(filename) - 4] = '\0';
@@ -142,32 +184,58 @@ int extract_longest_seq(char *filename)
         exit(EXIT_FAILURE);
     }
 
-    fread((u_int8_t *)&long_buffer, sizeof(u_int8_t), 2, src);
-    fread(&short_buffer, sizeof(u_int8_t), 1, src);
+    /*Read metadata used for compression*/
+    fread(long_buffer, sizeof(u_int8_t), 2, src);
+    fread(short_buffer, sizeof(u_int8_t), 1, src);
 
-    while (fread((u_int8_t *)(&buff), sizeof(u_int8_t), 2, src) == 2)
-    {
-        if (buff == long_buffer)
+    /*Fill the buffer with first 2 bytes*/
+    fread(longer_buff, sizeof(u_int8_t), 2, src);
+
+    while (fread(buff, sizeof(u_int8_t), 1, src) == 1) {
+        if (longer_buff[0] == long_buffer[0] && longer_buff[1] == long_buffer[1])
         {
-            fwrite(&short_buffer, sizeof(u_int8_t), 1, dest);
+            fwrite(short_buffer, sizeof(u_int8_t), 1, dest);
+            longer_buff[0] = longer_buff[1];
+            longer_buff[1] = buff[0];
+            fread(buff, sizeof(u_int8_t), 1, src);
+            longer_buff[0] = longer_buff[1];
+            longer_buff[1] = buff[0];
+            continue;
         }
         else
         {
-            /*Search the short sequence pattern in the 2 bytes read*/
-            if (short_buffer == ((u_int8_t *)(&buff))[0])
+            if (short_buffer[0] == longer_buff[0])
             {
-                fwrite(&long_buffer, sizeof(u_int8_t), 2, dest);
-            } else {
-                fwrite(&(((u_int8_t *)(&buff))[0]), sizeof(u_int8_t), 1, dest);
+                fwrite(long_buffer, sizeof(u_int8_t), 2, dest);
             }
-            if (short_buffer == ((u_int8_t *)(&buff))[1])
+            else
             {
-                fwrite(&long_buffer, sizeof(u_int8_t), 2, dest);
-            } else {
-                fwrite(&(((u_int8_t *)(&buff))[1]), sizeof(u_int8_t), 1, dest);
+                fwrite(&(longer_buff[0]), sizeof(u_int8_t), 1, dest);
             }
-            
         }
+        /*update the new buffer with two most recent bytes*/
+        longer_buff[0] = longer_buff[1];
+        longer_buff[1] = buff[0];
+    } 
+    if (short_buffer[0] == long_buffer[0])
+    {
+        fwrite(long_buffer, sizeof(u_int8_t), 2, dest);
+    }
+    else
+    {
+        fwrite(&(longer_buff[0]), sizeof(u_int8_t), 1, dest);
+    }
+    longer_buff[0] = longer_buff[1];
+    longer_buff[1] = buff[0];
+
+    if (short_buffer[0] == longer_buff[0])
+    {
+        fwrite(long_buffer, sizeof(u_int8_t), 2, dest);
+    }
+    else
+    {
+        fwrite(&(longer_buff[0]), sizeof(u_int8_t), 1, dest);
     }
 
+    return 0;
 }
