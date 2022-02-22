@@ -180,7 +180,7 @@ int extract_longest_seq(char *filename)
 
     if (!src || !dest)
     {
-        perror("Error\n");
+        perror("Error on opening the files");
         exit(EXIT_FAILURE);
     }
 
@@ -236,6 +236,10 @@ int extract_longest_seq(char *filename)
     {
         fwrite(&(longer_buff[0]), sizeof(u_int8_t), 1, dest);
     }
+
+    fclose(src);
+    fclose(dest);
+
 
     return 0;
 }
