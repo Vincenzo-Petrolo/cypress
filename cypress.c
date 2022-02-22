@@ -4,6 +4,7 @@
 #include <string.h>
 
 int compress_longest_seq(char *filename);
+int extract_longest_seq(char *filename);
 
 int main(int argc, char **argv)
 {
@@ -99,22 +100,20 @@ int compress_longest_seq(char *filename)
         }
         else
         {
-            /*Search the short sequence patter in the 2 bytes read*/
+            /*Search the short sequence pattern in the 2 bytes read*/
             if (short_buffer == ((u_int8_t *)(&buff))[0])
             {
                 fwrite(&long_buffer, sizeof(u_int8_t), 2, dest);
+            } else {
+                fwrite(&(((u_int8_t *)(&buff))[0]), sizeof(u_int8_t), 1, dest);
+            }
+            if (short_buffer == ((u_int8_t *)(&buff))[1])
+            {
+                fwrite(&long_buffer, sizeof(u_int8_t), 2, dest);
+            } else {
                 fwrite(&(((u_int8_t *)(&buff))[1]), sizeof(u_int8_t), 1, dest);
             }
-            else if (short_buffer == ((u_int8_t *)(&buff))[1])
-            {
-                fwrite(&(((u_int8_t *)(&buff))[0]), sizeof(u_int8_t), 1, dest);
-                fwrite(&long_buffer, sizeof(u_int8_t), 2, dest);
-            }
-            else
-            {
-                /*if the short sequence is not found, then simply copy from src to dest*/
-                fwrite((u_int8_t *)&buff, sizeof(u_int8_t), 2, dest);
-            }
+            
         }
     }
 
@@ -129,8 +128,9 @@ int extract_longest_seq(char *filename)
 {
 
     FILE *src, *dest;
-    u_int16_t longest_sequence;
-    u_int8_t shortest_sequence;
+    u_int16_t long_buffer;
+    u_int16_t buff;
+    u_int8_t short_buffer;
 
     src = fopen(filename, "r");
     filename[strlen(filename) - 4] = '\0';
@@ -138,7 +138,36 @@ int extract_longest_seq(char *filename)
 
     if (!src || !dest)
     {
-        printf("Error\n");
+        perror("Error\n");
         exit(EXIT_FAILURE);
     }
+
+    fread((u_int8_t *)&long_buffer, sizeof(u_int8_t), 2, src);
+    fread(&short_buffer, sizeof(u_int8_t), 1, src);
+
+    while (fread((u_int8_t *)(&buff), sizeof(u_int8_t), 2, src) == 2)
+    {
+        if (buff == long_buffer)
+        {
+            fwrite(&short_buffer, sizeof(u_int8_t), 1, dest);
+        }
+        else
+        {
+            /*Search the short sequence pattern in the 2 bytes read*/
+            if (short_buffer == ((u_int8_t *)(&buff))[0])
+            {
+                fwrite(&long_buffer, sizeof(u_int8_t), 2, dest);
+            } else {
+                fwrite(&(((u_int8_t *)(&buff))[0]), sizeof(u_int8_t), 1, dest);
+            }
+            if (short_buffer == ((u_int8_t *)(&buff))[1])
+            {
+                fwrite(&long_buffer, sizeof(u_int8_t), 2, dest);
+            } else {
+                fwrite(&(((u_int8_t *)(&buff))[1]), sizeof(u_int8_t), 1, dest);
+            }
+            
+        }
+    }
+
 }
