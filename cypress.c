@@ -40,7 +40,7 @@ int main(int argc, char **argv)
                 total_bytes_saved += bytes_saved;
                 accumulated_overhead += OVERHEAD;
                 compression_times++;
-            } while (compression_times != 2);
+            } while (bytes_saved > OVERHEAD);
             printf("Saved %lu bytes\n", (total_bytes_saved - accumulated_overhead + 4));
             commit_file(optarg, compression_times);
             exit(EXIT_SUCCESS);
