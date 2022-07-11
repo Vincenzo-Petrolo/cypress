@@ -8,5 +8,7 @@ test_extract:
 	rm test_file
 	./cypress -x test_file.cpr
 	hexdump -C test_file
+static:
+	gcc -O3 -static cypress.c main.c cypress.h -o cypress
 clean_test:
 	rm *.cpr
