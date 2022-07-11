@@ -1,5 +1,5 @@
 compile:
-	gcc -O3 cypress.c -o cypress
+	gcc -O3 cypress.c main.c cypress.h -o cypress
 test_compression:
 	echo "cccciiiiaaaaoooo" > test_file
 	./cypress -c test_file

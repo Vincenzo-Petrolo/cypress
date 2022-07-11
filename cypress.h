@@ -1,7 +1,7 @@
 #ifndef __CYPRESS__
 #define __CYPRESS__
 
-#define POSSIBLE_N_SEQ 512
+#define POSSIBLE_N_SEQ 256*256
 #define POSSIBLE_M_SEQ 256
 
 #define OVERHEAD 10
