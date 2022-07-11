@@ -62,6 +62,7 @@ static void _find_max_min(cypress_t *cpr)
         {
             cpr->file_statistics.max[0] = (char)(i & 0xFF);   // Pick rightmost 8 bits
             cpr->file_statistics.max[1] = (char)((i & 0xFF00) >> 8); // Pick leftmost 8 bits
+            max = cpr->file_statistics.N_seq_cnt[i];
         }
 
         if (i < 256)
@@ -69,6 +70,7 @@ static void _find_max_min(cypress_t *cpr)
             if (cpr->file_statistics.M_seq_cnt[i] < min)
             {
                 cpr->file_statistics.min[0] = (char)i;
+                min = cpr->file_statistics.M_seq_cnt[i];
             }
         }
     }
@@ -133,6 +135,8 @@ static void _replace(cypress_t *cpr, char *filename)
             }
         }
     }
+    /*After i need to write the last byte i read*/
+    fwrite(&lbuf[0], sizeof(char), 1, cpr_fp);
 
     fclose(cpr_fp);
     fclose(fp);
