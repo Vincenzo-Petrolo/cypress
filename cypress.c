@@ -1,346 +1,160 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
+#include "cypress.h"
 #include <string.h>
+#include <stdio.h>
 
-#define OVERHEAD 3 // bytes for each compression
-#define N 2        // bytes
-#define M 1        // byte
-#define Ls (1 << 8 * N)
-#define Ss (1 << 8 * M)
-#define unpredictable_random_name "__c_y_press_020141__"
-/**
- * TODO compress multiple times
- * until the delta of saved bytes
- * reaches 0.
- */
-
-int compress_longest_seq(char *filename);
-int extract_longest_seq(char *filename);
-int commit_file(char *filename, int times);
-int get_compression_times(char *filename);
-
-int main(int argc, char **argv)
+/*Build the map for the sequences*/
+static void _hash_build(cypress_t *cpr, char *filename)
 {
-    int c;
-    u_int64_t bytes_saved = 0;
-    u_int64_t total_bytes_saved = 0;
-    u_int64_t accumulated_overhead = 0;
-    int compression_times = 0;
+    int first = 1;
+    char buf;
+    FILE *fp = fopen(filename, "rb");
+    char lbuf[2], sbuf[1];
 
-    while ((c = getopt(argc, argv, "c:x:")) != -1)
+    while (fread(&buf, sizeof(char), 1, fp) == 1)
     {
-        switch (c)
+        if (first)
         {
-        case 'c': // compress
-            do
-            {
-                /*Apply compression many times until i reach the maximum*/
-                bytes_saved = compress_longest_seq(optarg);
-                total_bytes_saved += bytes_saved;
-                accumulated_overhead += OVERHEAD;
-                compression_times++;
-            } while (bytes_saved > OVERHEAD);
-            printf("Saved %lu bytes\n", (total_bytes_saved - accumulated_overhead + 4));
-            commit_file(optarg, compression_times);
-            exit(EXIT_SUCCESS);
-            break;
-        case 'x': // extract
-            compression_times = get_compression_times(optarg);
-            while (compression_times > 0)
-            {
-                compression_times--;
-                extract_longest_seq(optarg);
-            }
-            exit(EXIT_SUCCESS);
-            break;
-        default:
-            // nothing to do
-            break;
-        }
-    }
-
-    return 0;
-}
-
-int commit_file(char *filename, int times)
-{
-    FILE *src, *dest;
-    char buff;
-
-    rename(filename, unpredictable_random_name);
-    src = fopen(unpredictable_random_name, "rb");
-    dest = fopen(filename, "wb");
-    /*Write number of times compression has occurred*/
-    fwrite(&times, sizeof(int), 1, dest);
-    /*Copy everything to a new file*/
-    while ((buff = fgetc(src)) != EOF)
-    {
-        fputc(buff, dest);
-    }
-
-    fclose(src);
-    fclose(dest);
-    remove(unpredictable_random_name);
-
-    return 0;
-}
-
-/*This compression method searches the sequence on n bits which
-appears the most times and replaces it with a shorter sequence on m bits (m < n)
-which appears the less times*/
-int compress_longest_seq(char *filename)
-{
-    FILE *src, *dest;
-    u_int64_t longest_sequences[Ls] = {0}; // this might become cumbersome
-    u_int64_t shortest_sequence[Ss] = {0}; // this too
-    u_int64_t max = 0, min = __UINT64_MAX__;
-    u_int8_t long_buffer[N];
-    u_int8_t buff[M];
-    u_int8_t longer_buff[N];
-    u_int8_t short_buffer[M];
-    const char *last_four = &filename[strlen(filename) - 4];
-
-    /*If .cpr is already present at the end, then don't add*/
-    if (strcmp(last_four, ".cpr") == 0)
-    {
-        rename(filename, unpredictable_random_name);
-        src = fopen(unpredictable_random_name, "rb");
-        dest = fopen(filename, "wb");
-    }
-    else
-    {
-        src = fopen(filename, "rb");
-        dest = fopen(strcat(filename, ".cpr"), "wb");
-    }
-
-    if (!src || !dest)
-    {
-        perror("Error\n");
-        exit(EXIT_FAILURE);
-    }
-
-    /*Fill the buffer with first 2 bytes*/
-    fread(&longer_buff, sizeof(u_int8_t), 2, src);
-
-    while (fread(buff, sizeof(u_int8_t), 1, src) == 1)
-    {
-        int tmp = ((((u_int16_t)longer_buff[0]) << 8) | (u_int16_t)longer_buff[1]);
-        longest_sequences[tmp]++;
-
-        /*update the new buffer with two most recent bytes*/
-        longer_buff[0] = longer_buff[1];
-        longer_buff[1] = buff[0];
-    }
-
-    rewind(src);
-
-    while (fread(short_buffer, sizeof(u_int8_t), 1, src) == 1)
-    {
-        shortest_sequence[short_buffer[0]]++;
-    }
-
-    /*Search max and minimum*/
-    for (size_t i = 0; i < Ls; i++)
-    {
-        if (longest_sequences[i] > max)
-        {
-            max = longest_sequences[i];
-            long_buffer[1] = ((u_int16_t)i) & 0x00FF;
-            long_buffer[0] = (((u_int16_t)i) >> 8) & 0x00FF;
-        }
-    }
-
-    for (size_t i = 0; i < Ss; i++)
-    {
-        if (shortest_sequence[i] < min)
-        {
-            min = shortest_sequence[i];
-            short_buffer[0] = (u_int8_t)i;
-        }
-    }
-
-    /*Write info for reconstruction*/
-    fwrite(long_buffer, sizeof(u_int8_t), 2, dest);
-    fwrite(short_buffer, sizeof(u_int8_t), 1, dest);
-
-    rewind(src);
-    /*Read again and replace*/
-    /*Fill the buffer with first 2 bytes*/
-    fread(longer_buff, sizeof(u_int8_t), 2, src);
-
-    while (fread(buff, sizeof(u_int8_t), 1, src) == 1)
-    {
-        if (longer_buff[0] == long_buffer[0] && longer_buff[1] == long_buffer[1])
-        {
-            fwrite(short_buffer, sizeof(u_int8_t), 1, dest);
-            /*Refill the buffer*/
-            longer_buff[0] = longer_buff[1];
-            longer_buff[1] = buff[0];
-            fread(buff, sizeof(u_int8_t), 1, src);
-            longer_buff[0] = longer_buff[1];
-            longer_buff[1] = buff[0];
-            continue;
+            lbuf[0] = buf;
+            first = 0;
         }
         else
         {
-            if (short_buffer[0] == long_buffer[0])
+            lbuf[1] = lbuf[0];
+            lbuf[0] = buf;
+            int i = 256 * lbuf[1] + lbuf[0];
+            cpr->file_statistics.N_seq_cnt[i]++;
+        }
+    }
+
+    fclose(fp);
+    fp = fopen(filename, "rb");
+
+    while (fread(&buf, sizeof(char), 1, fp) == 1)
+    {
+        sbuf[0] = buf;
+        int i = sbuf[0];
+        cpr->file_statistics.M_seq_cnt[i]++;
+    }
+
+    fclose(fp);
+
+    // Stats are built, return
+    return;
+}
+
+static void _find_max_min(cypress_t *cpr)
+{
+    unsigned int max = 0, min = __UINT32_MAX__;
+
+    for (size_t i = 0; i < 512; i++)
+    {
+        if (cpr->file_statistics.N_seq_cnt[i] > max)
+        {
+            cpr->file_statistics.max[0] = (char)(i & 0xFF);   // Pick last 8 bits
+            cpr->file_statistics.max[1] = (char)(i & 0xFF00); // Pick rightmost 8 bits
+        }
+
+        if (i < 256)
+        {
+            if (cpr->file_statistics.M_seq_cnt[i] < min)
             {
-                fwrite(long_buffer, sizeof(u_int8_t), 2, dest);
-            }
-            else
-            {
-                fwrite(&(longer_buff[0]), sizeof(u_int8_t), 1, dest);
+                cpr->file_statistics.min[0] = (char)i;
             }
         }
-        /*update the new buffer with two most recent bytes*/
-        longer_buff[0] = longer_buff[1];
-        longer_buff[1] = buff[0];
-    }
-    if (short_buffer[0] == longer_buff[0])
-    {
-        fwrite(long_buffer, sizeof(u_int8_t), 2, dest);
-    }
-    else
-    {
-        fwrite(&(longer_buff[0]), sizeof(u_int8_t), 1, dest);
-    }
-    longer_buff[0] = longer_buff[1];
-    longer_buff[1] = buff[0];
-
-    if (short_buffer[0] == longer_buff[0])
-    {
-        fwrite(long_buffer, sizeof(u_int8_t), 2, dest);
-    }
-    else
-    {
-        fwrite(&(longer_buff[0]), sizeof(u_int8_t), 1, dest);
     }
 
-    fclose(src);
-    fclose(dest);
-    remove(unpredictable_random_name);
-    /*Return how many bytes i saved*/
-    return (max - min);
+    return;
 }
 
-int get_compression_times(char *filename)
+static void _write_overhead(cypress_t *cpr, char *filename)
 {
-    FILE *src, *dest;
-    int compression_times;
-    char c;
+    FILE *fp = fopen(strcat(filename, ".cpr"), "w");
 
-    rename(filename, unpredictable_random_name);
-    src = fopen(unpredictable_random_name, "r");
-    dest = fopen(filename, "w");
+    /*Write the first two bytes, and the 1 byte*/
+    fwrite(&(cpr->file_statistics.max[1]), sizeof(char), 1, fp);
+    fwrite(&(cpr->file_statistics.max[0]), sizeof(char), 1, fp);
+    fwrite(&(cpr->file_statistics.min[0]), sizeof(char), 1, fp);
 
-    if (!src || !dest)
-    {
-        perror("Error:");
-        exit(EXIT_FAILURE);
-    }
-    /*Strip the integer at the beginning*/
-    fread(&compression_times, sizeof(int), 1, src);
-    /*Copy the file in a new file*/
-    while ((c = fgetc(src)) != EOF)
-    {
-        fputc(c, dest);
-    }
+    // For each compression i add an overhead equal to the bytes needed to compress it.
+    cpr->accumulated_overhead += 3;
 
-    fclose(src);
-    fclose(dest);
-    remove(unpredictable_random_name);
-
-    return compression_times;
+    fclose(fp);
 }
 
-int extract_longest_seq(char *filename)
+static void _replace(cypress_t *cpr, char *filename)
 {
+    /*Create a new version of the file with .cpr as extension*/
+    FILE *cpr_fp, *fp;
+    int first = 1;
+    char buf;
+    char lbuf[2];
 
-    FILE *src, *dest;
-    u_int8_t long_buffer[N];
-    u_int8_t buff[M];
-    u_int8_t longer_buff[N];
-    u_int8_t short_buffer[M];
-    const char *last_four = &filename[strlen(filename) - 4];
+    /*Before everything write the infos to allow decompression in the file*/
+    _write_overhead(cpr, filename);
+    /*Open the files*/
+    cpr_fp = fopen(strcat(filename, ".cpr"), "w");
+    fp = fopen(filename, "rb");
 
-    if (strcmp(last_four, ".cpr") == 0)
+    /*Read from source file*/
+    while (fread(&buf, sizeof(char), 1, fp) == 1)
     {
-        /*It means i'm decompressing a .cpr file, so first time decompressing it*/
-        src = fopen(filename, "r");
-        filename[strlen(filename) - 4] = '\0';
-    }
-    else
-    {
-        rename(filename, unpredictable_random_name);
-        src = fopen(unpredictable_random_name, "r");
-    }
-
-    dest = fopen(filename, "wb");
-
-    if (!src || !dest)
-    {
-        perror("Error on opening the files");
-        exit(EXIT_FAILURE);
-    }
-
-    /*Read metadata used for compression*/
-    fread(long_buffer, sizeof(u_int8_t), 2, src);
-    fread(short_buffer, sizeof(u_int8_t), 1, src);
-
-    /*Fill the buffer with first 2 bytes*/
-    fread(longer_buff, sizeof(u_int8_t), 2, src);
-
-    while (fread(buff, sizeof(u_int8_t), 1, src) == 1)
-    {
-        if (longer_buff[0] == long_buffer[0] && longer_buff[1] == long_buffer[1])
+        if (first)
         {
-            fwrite(short_buffer, sizeof(u_int8_t), 1, dest);
-            longer_buff[0] = longer_buff[1];
-            longer_buff[1] = buff[0];
-            fread(buff, sizeof(u_int8_t), 1, src);
-            longer_buff[0] = longer_buff[1];
-            longer_buff[1] = buff[0];
-            continue;
+            // Just fill the buffer at the beginning
+            lbuf[0] = buf;
+            first = 0;
         }
         else
         {
-            if (short_buffer[0] == longer_buff[0])
+            lbuf[1] = lbuf[0];
+            lbuf[0] = buf;
+            if (lbuf[1] == cpr->file_statistics.max[1] && lbuf[0] == cpr->file_statistics.max[0])
             {
-                fwrite(long_buffer, sizeof(u_int8_t), 2, dest);
+                // I found a sequence that matches
+                // Transfer the shorter byte into the file
+                fwrite(&(cpr->file_statistics.min[0]), sizeof(char), 1, cpr_fp);
+                // Need to refill the buffer
+                first = 1;
+                // I hit a sequence, therefore i save 1 byte
+                cpr->saved_bytes++;
             }
             else
             {
-                fwrite(&(longer_buff[0]), sizeof(u_int8_t), 1, dest);
+                // The current sequence does not match
+                // Transfer the oldest byte to the destination file
+                fwrite(&lbuf[1], sizeof(char), 1, cpr_fp);
             }
         }
-        /*update the new buffer with two most recent bytes*/
-        longer_buff[0] = longer_buff[1];
-        longer_buff[1] = buff[0];
-    }
-    if (short_buffer[0] == long_buffer[0])
-    {
-        fwrite(long_buffer, sizeof(u_int8_t), 2, dest);
-    }
-    else
-    {
-        fwrite(&(longer_buff[0]), sizeof(u_int8_t), 1, dest);
-    }
-    longer_buff[0] = longer_buff[1];
-    longer_buff[1] = buff[0];
-
-    if (short_buffer[0] == longer_buff[0])
-    {
-        fwrite(long_buffer, sizeof(u_int8_t), 2, dest);
-    }
-    else
-    {
-        fwrite(&(longer_buff[0]), sizeof(u_int8_t), 1, dest);
     }
 
-    fclose(src);
-    fclose(dest);
-    remove(unpredictable_random_name);
+    fclose(cpr_fp);
+    fclose(fp);
 
-    return 0;
+    return;
+}
+
+/*Perform compression of the given file, and return the saved bytes*/
+int compress(cypress_t *cpr, char *filename)
+{
+
+    /*First build the hash map for the sequences in the file*/
+    _hash_build(cpr, filename);
+    /*Now find 2 byte maximum frequency seq, and 1 byte minimum frequency seq*/
+    _find_max_min(cpr);
+    /*Now perform the replacement*/
+    _replace(cpr, filename);
+
+    /*Increase the compression times*/
+    cpr->compression_times += 1;
+
+    return cpr->saved_bytes;
+}
+
+void init(cypress_t *cpr)
+{
+    cpr->accumulated_overhead = 0;
+    cpr->compression_times = 0;
+    cpr->saved_bytes = 0;
+
+    return;
 }
