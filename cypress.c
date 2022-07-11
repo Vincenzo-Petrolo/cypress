@@ -163,6 +163,64 @@ int compress(cypress_t *cpr, char *filename)
     return cpr->saved_bytes;
 }
 
+static void _read_overhead(cypress_t *cpr, char *filename)
+{
+    FILE *cpr_fp = fopen(filename, "rb");
+    char buf;
+    int res;
+    res = fread(&buf, sizeof(char), 1, cpr_fp);
+    cpr->file_statistics.max[1] = buf;
+    res = fread(&buf, sizeof(char), 1, cpr_fp);
+    cpr->file_statistics.max[0] = buf;
+    res = fread(&buf, sizeof(char), 1, cpr_fp);
+    cpr->file_statistics.min[0] = buf;
+
+    fclose(cpr_fp);
+
+    return;
+}
+
+static void _reconstruct(cypress_t *cpr, char *filename)
+{
+    FILE *cpr_fp, *fp;
+    cpr_fp = fopen(filename, "rb");
+    char *new_filename = strtok(filename, ".");
+    fp = fopen(new_filename, "w");
+    char buf;
+
+    //Remove the first 3 bytes by performing dummy reads
+    buf = fread(&buf, sizeof(char), 1, cpr_fp);
+    buf = fread(&buf, sizeof(char), 1, cpr_fp);
+    buf = fread(&buf, sizeof(char), 1, cpr_fp);
+
+    while (fread(&buf, sizeof(char), 1, cpr_fp) == 1)
+    {
+        if (buf == cpr->file_statistics.min[0]) {
+            /*Write instead the full length of bytes*/
+            fwrite(&(cpr->file_statistics.max[1]), sizeof(char),1, fp);
+            fwrite(&(cpr->file_statistics.max[0]), sizeof(char),1, fp);
+        } else {
+            fwrite(&buf, sizeof(char), 1, fp);
+        }
+    }
+    
+
+    fclose(cpr_fp);
+    fclose(fp);
+
+    return;
+}
+
+void extract(cypress_t *cpr, char *filename)
+{
+    /*Read the first 3 bytes*/
+    _read_overhead(cpr, filename);
+    /*Perform the reconstruction of the original file*/
+   _reconstruct(cpr, filename);
+
+   return;
+}
+
 void init(cypress_t *cpr)
 {
     cpr->accumulated_overhead = 0;

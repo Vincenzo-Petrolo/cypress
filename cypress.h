@@ -24,6 +24,7 @@ typedef struct
 
 int compress(cypress_t *cpr, char *filename);
 void init(cypress_t *cpr);
+void extract(cypress_t *cpr, char *filename);
 
 
 #endif

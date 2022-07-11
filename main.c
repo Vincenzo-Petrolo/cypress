@@ -22,6 +22,8 @@ int main(int argc, char **argv)
             exit(EXIT_SUCCESS);
             break;
         case 'x': // extract
+            printf("Starting extraction on %s\n", optarg);
+            extract(&cypress, optarg);
             exit(EXIT_SUCCESS);
             break;
         default:
